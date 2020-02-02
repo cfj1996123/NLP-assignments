@@ -21,7 +21,7 @@ eval_interval = 1
 base_lr = 0.001
 # path info
 model_folder = "model"
-checkpoint_path = ""
+checkpoint_path = "model/model_epoch100"
 train_path = "ptb_lm_small/train"
 eval_path = "ptb_lm_small/dev"
 test_path = "ptb_lm_small/test"
@@ -43,11 +43,9 @@ def train(verbal=True):
     dataset = Dataset(train_path, eval_path, test_path)
     train = batchify(dataset.train, batch_size)
     eval = batchify(dataset.eval, batch_size)
-    test = batchify(dataset.test, batch_size)
 
     train = train.to(device)
     eval = eval.to(device)
-    test = test.to(device)
 
     # load model, optimizer and loss function
     os.makedirs(model_folder, exist_ok=True)
@@ -134,8 +132,45 @@ def train(verbal=True):
                        )
 
 
+
+def test():
+    # check access to gpu
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+    # load dataset
+    dataset = Dataset(train_path, eval_path, test_path)
+    test = batchify(dataset.test, batch_size)
+    test = test.to(device)
+
+    net = language_model(num_words=dataset.num_words, embed_dim=embed_dim)
+    net.eval()
+    net = net.to(device)
+    entropy_loss = nn.CrossEntropyLoss(reduction="mean")
+
+    ## restore from checkpoint
+    assert checkpoint_path!="", "invalid checkpoint!"
+    ckpt = torch.load(checkpoint_path, map_location=lambda storage, loc: storage)
+    net.load_state_dict(ckpt['model_params'])
+    epoch = ckpt['epoch']
+
+    test_loss = []
+    for start in range(0, test.size(0) - seq_len, seq_len):
+        input = test[start:(start + seq_len), :]  # size: (seq_len, batch_size)
+        truth = test[(start + 1):(start + seq_len + 1), :]  # size: (seq_len, batch_size)
+        output = net.forward(input)  # size: (seq_len, batch_size, num_words)
+
+        # compute training loss
+        output = output.permute(0, 2, 1)  # size: (seq_len, num_words, batch_size)
+        loss = entropy_loss(output, truth)
+        test_loss.append(loss.item())
+
+    print("test loss: {}".format(np.mean(test_loss)))
+
+
+
 if __name__ == "__main__":
-    train(verbal=False)
+    # train(verbal=False)
+    test()
 
 
 
